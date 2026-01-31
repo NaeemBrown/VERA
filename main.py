@@ -8,7 +8,8 @@ import pyttsx3
 import datetime
 
 # --- IMPORTS ---
-import skills           
+import skills  
+import security_ops         
 import admin           
 import tools           
 import volume_ops     
@@ -163,6 +164,12 @@ def process_command(command, source):
         if text:
             skills.save_note(text)
             speak("Saved.")
+        return
+    
+    elif "sentry mode" in command or "trap" in command or "secure the room" in command:
+        # We run this in the main thread because it NEEDS to block everything else
+        # until the trap is sprung.
+        security_ops.engage_sentry_mode(speak)
         return
     
     elif "exit" in command:
