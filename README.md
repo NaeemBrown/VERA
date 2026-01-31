@@ -1,11 +1,13 @@
 # V.E.R.A. (Virtual Electronic Remote Assistant)
 > **"Protocol: Online."**
 
+![Build Status](https://github.com/NaeemBrown/VERA/actions/workflows/build.yml/badge.svg)
+[![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+![Tests](https://img.shields.io/badge/tests-pytest-green)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
-![AI](https://img.shields.io/badge/AI-Groq%20%7C%20Gemini-green)
-![Status](https://img.shields.io/badge/System-Operational-orange)
+![Platform](https://img.shields.io/badge/platform-windows-lightgrey)
 
-**V.E.R.A.** is a locally-hosted, voice-activated AI Operating System designed for power users, developers, and IT professionals. Unlike standard assistants (Siri/Alexa), V.E.R.A. has full control over the host machine—capable of writing code, debugging screens, managing windows, and executing complex workflows.
+**V.E.R.A.** is a locally-hosted, voice-activated AI Operating System designed for power users, developers, and IT professionals. Unlike standard assistants, V.E.R.A. has full control over the host machine—capable of writing code, debugging screens, managing windows, and executing complex workflows.
 
 ---
 
@@ -44,7 +46,7 @@ V.E.R.A. utilizes a **Dual-Core AI Approach**:
 ### Quick Start
 1.  **Clone the repository:**
     ```bash
-    git clone [https://github.com/NaeemBrown/VERA.git](https://github.com/NaeemBrown/VERA.git)
+    git clone https://github.com/NaeemBrown/VERA.git
     cd VERA
     ```
 
@@ -84,6 +86,15 @@ V.E.R.A. utilizes a **Dual-Core AI Approach**:
 * **Local Processing:** Voice activation and hand tracking run locally.
 * **No Cloud Logs:** Screenshots taken for analysis are processed by the API and not stored on any external server.
 * **API Security:** Keys are loaded via `.env` and excluded from version control.
+
+---
+
+## 🛠️ Engineering Standards
+V.E.R.A. is built with a production-grade DevOps pipeline:
+* **CI/CD Pipeline:** GitHub Actions automatically builds and tests every commit.
+* **Static Analysis:** Code style is enforced via `Black` and Pre-Commit Hooks.
+* **Integration Testing:** Critical modules are verified with `pytest` before deployment.
+* **Artifact Delivery:** Successful builds automatically compile a portable `.exe`.
 
 ---
 

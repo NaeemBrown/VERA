@@ -19,6 +19,9 @@ import ai_ops
 import app_ops  # <--- Ensure app_ops.py is in the same folder
 import voice_engine
 
+
+x = 5
+y = 2
 # --- STATE ---
 LAST_INTERACTION = 0
 hand_mouse_process = None
