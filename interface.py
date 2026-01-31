@@ -6,6 +6,8 @@ import threading
 import speech_recognition as sr
 import main
 import time
+import os
+import subprocess
 
 # --- CONFIGURATION ---
 ctk.set_appearance_mode("Dark")
@@ -88,7 +90,7 @@ class JarvisUI:
         )
         self.lbl_text.pack(fill="both", expand=True, pady=(10, 0))
 
-        # 2. STATS MODE WIDGET (Hidden by default)
+        # 2. STATS MODE WIDGET
         self.frame_stats = ctk.CTkFrame(self.frame_right, fg_color="transparent")
 
         # --- GIF LOADING ---
@@ -99,70 +101,64 @@ class JarvisUI:
 
         # --- HOOKS ---
         main.gui_popup_hook = self.start_typewriter
-        main.gui_stats_hook = self.show_stats_dashboard  # <--- NEW HOOK
+        main.gui_stats_hook = self.show_stats_dashboard
+        main.gui_cam_hook = self.launch_vision_system  # Trigger vision via VENV
 
-        # Start Voice
+        # Start Voice Loop in Thread
         self.thread = threading.Thread(target=self.run_voice_loop)
         self.thread.daemon = True
         self.thread.start()
 
         self.root.mainloop()
 
-    # --- NEW: STATS DASHBOARD ---
+    def launch_vision_system(self):
+        """Forces the use of the 3.12 VENV to avoid 3.13 library errors."""
+        venv_path = os.path.join(os.getcwd(), "venv", "Scripts", "python.exe")
+        if os.path.exists(venv_path):
+            subprocess.Popen(
+                [venv_path, "hand_mouse_equator.py"],
+                creationflags=subprocess.CREATE_NEW_CONSOLE,
+            )
+            return "Vision system initiated."
+        else:
+            return "VENV not found. Manual intervention required."
+
     def show_stats_dashboard(self, data):
-        """Replaces text with progress bars."""
         self.root.after(0, lambda: self._build_stats_ui(data))
 
     def _build_stats_ui(self, data):
-        # 1. Hide Text
         self.lbl_text.pack_forget()
-
-        # 2. Clear previous stats if any
         for widget in self.frame_stats.winfo_children():
             widget.destroy()
-
         self.frame_stats.pack(fill="both", expand=True, pady=(10, 0))
 
-        # Helper to draw a bar
         def draw_bar(label, value, color):
             row = ctk.CTkFrame(self.frame_stats, fg_color="transparent")
             row.pack(fill="x", pady=5)
-
             ctk.CTkLabel(
                 row, text=label, font=("Consolas", 14, "bold"), width=60, anchor="w"
             ).pack(side="left")
-
             bar = ctk.CTkProgressBar(
                 row, height=15, corner_radius=5, progress_color=color
             )
-            bar.set(value / 100)  # 0.0 to 1.0
+            bar.set(value / 100)
             bar.pack(side="left", fill="x", expand=True, padx=10)
-
             ctk.CTkLabel(
                 row, text=f"{value}%", font=("Consolas", 14), width=40, anchor="e"
             ).pack(side="right")
 
-        # Draw CPU (Cyan)
-        draw_bar("CPU", data["cpu"], "#00BFFF")
-        # Draw RAM (Green)
-        draw_bar("RAM", data["ram"], "#00FF00")
-        # Draw Battery (Orange)
-        draw_bar("PWR", data["battery"], "#FFA500")
+        draw_bar("CPU", data.get("cpu", 0), "#00BFFF")
+        draw_bar("RAM", data.get("ram", 0), "#00FF00")
+        draw_bar("PWR", data.get("battery", 0), "#FFA500")
 
     def reset_to_text_mode(self):
-        """Called when typing new text to clear stats."""
         self.frame_stats.pack_forget()
         self.lbl_text.pack(fill="both", expand=True, pady=(10, 0))
 
     def start_typewriter(self, text):
-        # Always reset to text mode first
         self.root.after(0, self.reset_to_text_mode)
         self.root.after(0, lambda: self.lbl_text.configure(text=""))
         self.type_char(text, 0)
-
-    # ... (Rest of your existing functions: load_gif, animate, type_char, voice_loop) ...
-    # PASTE THE REST OF YOUR EXISTING FUNCTIONS HERE (load_gif, animate, type_char, run_voice_loop)
-    # I will include them briefly so the file is complete for you:
 
     def load_gif(self, path):
         img = Image.open(path)

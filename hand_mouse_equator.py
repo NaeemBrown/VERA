@@ -4,6 +4,7 @@ import pyautogui
 import numpy as np
 import time
 
+
 # --- CONFIGURATION ---
 MARGIN = 20
 SENSITIVITY = 1.8
@@ -19,7 +20,13 @@ DARK_GREEN = (0, 100, 0)
 # --- SETUP ---
 pyautogui.PAUSE = 0
 pyautogui.FAILSAFE = False
-mp_hands = mp.solutions.hands
+try:
+    from mediapipe.python.solutions import hands as mp_hands
+    from mediapipe.python.solutions import drawing_utils as mp_drawing
+except ImportError:
+    import mediapipe.solutions.hands as mp_hands
+    import mediapipe.solutions.drawing_utils as mp_drawing
+
 hands = mp_hands.Hands(
     max_num_hands=1, model_complexity=0, min_detection_confidence=0.6
 )
