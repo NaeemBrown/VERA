@@ -8,26 +8,28 @@ DIRECT_PATHS = {
     "chrome": "chrome.exe",
     "calculator": "calc.exe",
     "edge": "msedge.exe",
-    "code": "code.exe"
+    "code": "code.exe",
 }
+
 
 def open_application(app_name):
     clean_name = app_name.lower().strip()
-    
+
     # STRATEGY A: Check Favorites (Instant)
     if clean_name in DIRECT_PATHS:
         try:
             os.startfile(DIRECT_PATHS[clean_name])
             return f"Opening {clean_name} (Fast)."
         except:
-            pass # Fallback if path is wrong
+            pass  # Fallback if path is wrong
 
     # STRATEGY B: Ask the Concierge (Slower but smart)
     try:
-        start_app(app_name, match_closest=True, output=False) 
+        start_app(app_name, match_closest=True, output=False)
         return f"Opening {app_name}."
     except:
         return f"I couldn't find {app_name}."
+
 
 def close_application(app_name):
     # (Keep your existing close logic here)

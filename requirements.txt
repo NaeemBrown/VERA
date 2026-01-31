@@ -22,3 +22,4 @@ SpeechRecognition
 python-dotenv
 ytmusicapi
 pyaudio
+pytest

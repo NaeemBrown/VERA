@@ -44,3 +44,10 @@ jobs:
       with:
         name: VERA_Release_Build
         path: dist/VERA_OS.exe
+
+  # --- QUALITY ASSURANCE GATE ---
+    - name: Run Integration Suite
+      run: |
+        pip install pytest
+        # Run specific professional suite
+        pytest tests/test_integration.py      

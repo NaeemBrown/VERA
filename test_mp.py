@@ -1,9 +1,11 @@
 try:
     import mediapipe as mp
+
     print(f"MediaPipe Location: {mp.__file__}")
-    
+
     # Try explicit import (sometimes fixes 3.13 issues)
     import mediapipe.python.solutions.hands as mp_hands
+
     print("SUCCESS: Explicit import worked!")
 except ImportError:
     print("FAIL: MediaPipe is not installed correctly.")

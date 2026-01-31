@@ -1,0 +1,46 @@
+[tool.black]
+line-length = 88
+target-version = ['py311']
+
+# FORCE it to check only these files/folders
+include = '''
+(
+    \.pyi?$
+  | main\.py
+  | interface\.py
+  | tools\.py
+  | admin\.py
+  | security_ops\.py
+  | tests/
+  | skills/
+  | ai_ops/
+)
+'''  # <--- YOU WERE MISSING THIS CLOSING QUOTE
+
+exclude = '''
+(
+  /(
+      \.git
+    | \.hg
+    | \.mypy_cache
+    | \.tox
+    | \.venv
+    | _build
+    | buck-out
+    | build
+    | dist
+    | venv
+    | env
+    | __pycache__
+    | Lib
+    | site-packages
+  )/
+)
+'''
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests",
+]
