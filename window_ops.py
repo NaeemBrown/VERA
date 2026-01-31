@@ -59,3 +59,13 @@ def move_to_primary(app_name):
         win.moveTo(0, 0)
         return True
     return False
+
+
+def minimize_window(app_name):
+    """Finds a window and minimizes it."""
+    win = get_window(app_name)
+    if win:
+        if not win.isMinimized:
+            win.minimize()
+        return True
+    return False

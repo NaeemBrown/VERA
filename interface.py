@@ -1,214 +1,229 @@
-import tkinter as tk
-import customtkinter as ctk
-from PIL import Image, ImageTk, ImageSequence
-import itertools
-import threading
-import speech_recognition as sr
-import main
-import time
-import os
-import subprocess
+import cv2
+import mediapipe as mp
+import pyautogui
+import numpy as np
+import sys
 
 # --- CONFIGURATION ---
-ctk.set_appearance_mode("Dark")
-ctk.set_default_color_theme("blue")
+# The "Active Region" is the box in the middle of the camera.
+# 0.2 means the box starts at 20% width/height and ends at 80%.
+# Smaller box = Less hand movement needed to cross the screen.
+FRAME_REDUCTION = 100  # Pixels to cut from edges (The "Green Box")
+SCROLL_SPEED = 8
+DEADZONE = 40
+WINDOW_NAME = "V.E.R.A. Vision V9"
+
+# --- VISUAL THEME (BGR) ---
+NEON_CYAN = (255, 255, 0)
+NEON_BLUE = (255, 100, 0)
+WARNING_RED = (0, 0, 255)
+GLASS_BLACK = (0, 0, 0)
+
+# --- SETUP ---
+pyautogui.PAUSE = 0
+pyautogui.FAILSAFE = False
+
+try:
+    from mediapipe.python.solutions import hands as mp_hands
+    from mediapipe.python.solutions import drawing_utils as mp_drawing
+    from mediapipe.python.solutions import drawing_styles as mp_styles
+except ImportError:
+    import mediapipe.solutions.hands as mp_hands
+    import mediapipe.solutions.drawing_utils as mp_drawing
+    import mediapipe.solutions.drawing_styles as mp_styles
+
+hands = mp_hands.Hands(
+    max_num_hands=1, model_complexity=0, min_detection_confidence=0.6
+)
+
+# Camera: Fast DSHOW
+cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+if not cap.isOpened():
+    cap = cv2.VideoCapture(0)
+
+cap.set(3, 640)
+cap.set(4, 480)
+
+# GET PRIMARY MONITOR SIZE
+screen_w, screen_h = pyautogui.size()
+prev_x, prev_y = 0, 0
+is_pinched = False
+
+cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+print(">> V.E.R.A. VISUAL INTERFACE: ONLINE")
 
 
-class JarvisUI:
-    def __init__(self):
-        self.root = tk.Tk()
+def draw_modern_hud(img, w, h, mode="IDLE"):
+    """Draws a semi-transparent 'Glass' HUD."""
+    overlay = img.copy()
 
-        # --- WINDOW SETUP ---
-        self.root.overrideredirect(True)
-        self.root.attributes("-topmost", True)
-        self.root.wm_attributes("-transparentcolor", "#000001")
-        self.root.configure(bg="#000001")
+    # Top/Bottom Bars
+    cv2.rectangle(overlay, (0, 0), (w, 40), GLASS_BLACK, -1)
+    cv2.rectangle(overlay, (0, h - 30), (w, h), GLASS_BLACK, -1)
+    cv2.addWeighted(overlay, 0.4, img, 0.6, 0, img)
 
-        screen_w = self.root.winfo_screenwidth()
-        screen_h = self.root.winfo_screenheight()
-        window_w = 700
-        window_h = 250
-        x_pos = screen_w - window_w - 50
-        y_pos = screen_h - window_h - 100
-        self.root.geometry(f"{window_w}x{window_h}+{x_pos}+{y_pos}")
+    # Active Region Box (The "Mouse Pad")
+    # Anything outside this box is clamped to the edge of the screen
+    cv2.rectangle(
+        img,
+        (FRAME_REDUCTION, FRAME_REDUCTION),
+        (w - FRAME_REDUCTION, h - FRAME_REDUCTION),
+        NEON_CYAN,
+        1,
+    )
 
-        # --- MAIN CARD ---
-        self.card = ctk.CTkFrame(
-            self.root,
-            width=window_w,
-            height=window_h,
-            corner_radius=20,
-            fg_color="black",
-            bg_color="#000001",
-            border_width=2,
-            border_color="#333333",
-        )
-        self.card.pack(fill="both", expand=True)
+    font = cv2.FONT_HERSHEY_DUPLEX
+    cv2.putText(
+        img, "V.E.R.A. // VISION", (15, 28), font, 0.6, NEON_CYAN, 1, cv2.LINE_AA
+    )
 
-        # --- LEFT COLUMN (AVATAR) ---
-        self.frame_left = ctk.CTkFrame(self.card, width=200, fg_color="transparent")
-        self.frame_left.pack(side="left", fill="y", padx=20, pady=20)
+    status_color = NEON_CYAN
+    if mode == "CLICKING":
+        status_color = WARNING_RED
+    if mode == "SCROLLING":
+        status_color = NEON_BLUE
 
-        self.lbl_gif = tk.Label(self.frame_left, bg="black", borderwidth=0)
-        self.lbl_gif.pack(pady=(10, 0))
+    cv2.putText(
+        img, f"STATUS: {mode}", (w - 180, 28), font, 0.6, status_color, 1, cv2.LINE_AA
+    )
 
-        self.lbl_status = ctk.CTkLabel(
-            self.frame_left,
-            text="ONLINE",
-            font=("Consolas", 16, "bold"),
-            text_color="gray",
-        )
-        self.lbl_status.pack(side="bottom", pady=10)
 
-        self.separator = ctk.CTkFrame(
-            self.card, width=2, height=150, fg_color="#333333"
-        )
-        self.separator.pack(side="left", fill="y", pady=40)
+def draw_reticle(img, x, y, is_active=False):
+    color = WARNING_RED if is_active else NEON_CYAN
+    r = 20
+    t = 2
+    # Open bracket box
+    cv2.line(img, (x - r, y - r), (x - r + 10, y - r), color, t)
+    cv2.line(img, (x - r, y - r), (x - r, y - r + 10), color, t)
+    cv2.line(img, (x + r, y - r), (x + r - 10, y - r), color, t)
+    cv2.line(img, (x + r, y - r), (x + r, y - r + 10), color, t)
+    cv2.line(img, (x - r, y + r), (x - r + 10, y + r), color, t)
+    cv2.line(img, (x - r, y + r), (x - r, y + r - 10), color, t)
+    cv2.line(img, (x + r, y + r), (x + r - 10, y + r), color, t)
+    cv2.line(img, (x + r, y + r), (x + r, y + r - 10), color, t)
 
-        # --- RIGHT COLUMN (DYNAMIC CONTENT) ---
-        self.frame_right = ctk.CTkFrame(self.card, fg_color="transparent")
-        self.frame_right.pack(side="left", fill="both", expand=True, padx=20, pady=20)
+    if is_active:
+        cv2.circle(img, (x, y), 5, color, -1)
 
-        self.lbl_header = ctk.CTkLabel(
-            self.frame_right,
-            text="V.E.R.A. OS v1.0",
-            font=("Arial", 12, "bold"),
-            text_color="#00BFFF",
-            anchor="w",
-        )
-        self.lbl_header.pack(fill="x")
 
-        # 1. TEXT MODE WIDGET
-        self.lbl_text = ctk.CTkLabel(
-            self.frame_right,
-            text="",
-            font=("Roboto", 18),
-            text_color="white",
-            wraplength=400,
-            justify="left",
-            anchor="nw",
-        )
-        self.lbl_text.pack(fill="both", expand=True, pady=(10, 0))
+while True:
+    if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_VISIBLE) < 1:
+        break
 
-        # 2. STATS MODE WIDGET
-        self.frame_stats = ctk.CTkFrame(self.frame_right, fg_color="transparent")
+    success, img = cap.read()
+    if not success:
+        break
 
-        # --- GIF LOADING ---
-        try:
-            self.load_gif("head.gif")
-        except:
-            self.lbl_gif.configure(text="[IMG]", fg="white")
+    img = cv2.flip(img, 1)
+    h, w, c = img.shape
+    centerY = h // 2
 
-        # --- HOOKS ---
-        main.gui_popup_hook = self.start_typewriter
-        main.gui_stats_hook = self.show_stats_dashboard
-        main.gui_cam_hook = self.launch_vision_system  # Trigger vision via VENV
+    current_mode = "IDLE"
 
-        # Start Voice Loop in Thread
-        self.thread = threading.Thread(target=self.run_voice_loop)
-        self.thread.daemon = True
-        self.thread.start()
+    rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    results = hands.process(rgb_img)
 
-        self.root.mainloop()
+    if results.multi_hand_landmarks:
+        for hand_lms in results.multi_hand_landmarks:
+            lm = hand_lms.landmark
 
-    def launch_vision_system(self):
-        """Forces the use of the 3.12 VENV to avoid 3.13 library errors."""
-        venv_path = os.path.join(os.getcwd(), "venv", "Scripts", "python.exe")
-        if os.path.exists(venv_path):
-            subprocess.Popen(
-                [venv_path, "hand_mouse_equator.py"],
-                creationflags=subprocess.CREATE_NEW_CONSOLE,
+            mp_drawing.draw_landmarks(
+                img,
+                hand_lms,
+                mp_hands.HAND_CONNECTIONS,
+                mp_styles.get_default_hand_landmarks_style(),
+                mp_styles.get_default_hand_connections_style(),
             )
-            return "Vision system initiated."
-        else:
-            return "VENV not found. Manual intervention required."
 
-    def show_stats_dashboard(self, data):
-        self.root.after(0, lambda: self._build_stats_ui(data))
+            # Raw Coordinates
+            x1, y1 = int(lm[8].x * w), int(lm[8].y * h)
+            x_thumb, y_thumb = int(lm[4].x * w), int(lm[4].y * h)
 
-    def _build_stats_ui(self, data):
-        self.lbl_text.pack_forget()
-        for widget in self.frame_stats.winfo_children():
-            widget.destroy()
-        self.frame_stats.pack(fill="both", expand=True, pady=(10, 0))
+            index_up = lm[8].y < lm[6].y
+            middle_up = lm[12].y < lm[10].y
 
-        def draw_bar(label, value, color):
-            row = ctk.CTkFrame(self.frame_stats, fg_color="transparent")
-            row.pack(fill="x", pady=5)
-            ctk.CTkLabel(
-                row, text=label, font=("Consolas", 14, "bold"), width=60, anchor="w"
-            ).pack(side="left")
-            bar = ctk.CTkProgressBar(
-                row, height=15, corner_radius=5, progress_color=color
-            )
-            bar.set(value / 100)
-            bar.pack(side="left", fill="x", expand=True, padx=10)
-            ctk.CTkLabel(
-                row, text=f"{value}%", font=("Consolas", 14), width=40, anchor="e"
-            ).pack(side="right")
+            # --- CURSOR MODE ---
+            if index_up and not middle_up:
+                current_mode = "CURSOR"
 
-        draw_bar("CPU", data.get("cpu", 0), "#00BFFF")
-        draw_bar("RAM", data.get("ram", 0), "#00FF00")
-        draw_bar("PWR", data.get("battery", 0), "#FFA500")
+                # --- COORDINATE MAPPING (THE FIX) ---
+                # 1. Map coordinates from the "Green Box" to the "Primary Monitor Size"
+                # This ensures (0,0) is top-left and (screen_w, screen_h) is bottom-right
+                x_mapped = np.interp(
+                    x1, (FRAME_REDUCTION, w - FRAME_REDUCTION), (0, screen_w)
+                )
+                y_mapped = np.interp(
+                    y1, (FRAME_REDUCTION, h - FRAME_REDUCTION), (0, screen_h)
+                )
 
-    def reset_to_text_mode(self):
-        self.frame_stats.pack_forget()
-        self.lbl_text.pack(fill="both", expand=True, pady=(10, 0))
+                # 2. Hard Clamp to Primary Monitor Bounds
+                # This prevents the mouse from flying off to a second monitor
+                x_mapped = max(0, min(screen_w - 1, x_mapped))
+                y_mapped = max(0, min(screen_h - 1, y_mapped))
 
-    def start_typewriter(self, text):
-        self.root.after(0, self.reset_to_text_mode)
-        self.root.after(0, lambda: self.lbl_text.configure(text=""))
-        self.type_char(text, 0)
+                # 3. Smooth it
+                curr_x = (
+                    prev_x + (x_mapped - prev_x) / 4
+                )  # Increased smoothing slightly
+                curr_y = prev_y + (y_mapped - prev_y) / 4
 
-    def load_gif(self, path):
-        img = Image.open(path)
-        self.frames = []
-        for frame in ImageSequence.Iterator(img):
-            frame = frame.resize((140, 140))
-            self.frames.append(ImageTk.PhotoImage(frame))
-        self.frame_cycle = itertools.cycle(self.frames)
-        self.animate()
-
-    def animate(self):
-        try:
-            self.lbl_gif.config(image=next(self.frame_cycle))
-            self.root.after(30, self.animate)
-        except:
-            pass
-
-    def type_char(self, full_text, index):
-        if index < len(full_text):
-            self.lbl_text.configure(text=full_text[: index + 1])
-            self.root.after(15, lambda: self.type_char(full_text, index + 1))
-
-    def update_status(self, text, color="white"):
-        self.root.after(
-            0, lambda: self.lbl_status.configure(text=text, text_color=color)
-        )
-
-    def run_voice_loop(self):
-        recognizer = sr.Recognizer()
-        recognizer.pause_threshold = 0.8
-        with sr.Microphone() as source:
-            self.update_status("CALIBRATING", "gray")
-            recognizer.adjust_for_ambient_noise(source, duration=0.5)
-            self.update_status("ONLINE", "#00FF00")
-            main.speak("Interface ready.")
-            while True:
                 try:
-                    self.update_status("LISTENING", "white")
-                    audio = recognizer.listen(source, timeout=None)
-                    self.update_status("PROCESSING", "cyan")
-                    command = recognizer.recognize_google(
-                        audio, language="en-ZA"
-                    ).lower()
-                    print(f"User: {command}")
-                    main.process_command(command, source)
-                    self.update_status("ONLINE", "#00FF00")
+                    pyautogui.moveTo(curr_x, curr_y)
                 except:
-                    self.update_status("ONLINE", "#00FF00")
-                    continue
+                    pass
 
+                prev_x, prev_y = curr_x, curr_y
 
-if __name__ == "__main__":
-    app = JarvisUI()
+                # Pinch Logic
+                dist = ((x1 - x_thumb) ** 2 + (y1 - y_thumb) ** 2) ** 0.5
+                if dist < 30:
+                    current_mode = "CLICKING"
+                    if not is_pinched:
+                        pyautogui.mouseDown()
+                        is_pinched = True
+                else:
+                    if is_pinched:
+                        pyautogui.mouseUp()
+                        is_pinched = False
+
+                draw_reticle(img, x1, y1, is_active=is_pinched)
+
+            # --- SCROLL MODE ---
+            elif index_up and middle_up:
+                current_mode = "SCROLLING"
+                distance = centerY - y1
+                cv2.line(img, (x1, y1), (x1, centerY), NEON_BLUE, 2)
+
+                if abs(distance) > DEADZONE:
+                    speed = int(np.interp(abs(distance), (DEADZONE, 150), (0, 20)))
+                    if distance > 0:
+                        pyautogui.scroll(-speed * SCROLL_SPEED)
+                        cv2.putText(
+                            img,
+                            "vvv",
+                            (x1 - 20, y1 + 40),
+                            cv2.FONT_HERSHEY_PLAIN,
+                            2,
+                            NEON_BLUE,
+                            2,
+                        )
+                    else:
+                        pyautogui.scroll(speed * SCROLL_SPEED)
+                        cv2.putText(
+                            img,
+                            "^^^",
+                            (x1 - 20, y1 - 20),
+                            cv2.FONT_HERSHEY_PLAIN,
+                            2,
+                            NEON_BLUE,
+                            2,
+                        )
+
+    draw_modern_hud(img, w, h, current_mode)
+    cv2.imshow(WINDOW_NAME, img)
+    if cv2.waitKey(1) & 0xFF == ord("q"):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
+sys.exit()

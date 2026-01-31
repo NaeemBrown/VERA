@@ -2,124 +2,158 @@ import cv2
 import mediapipe as mp
 import pyautogui
 import numpy as np
+import sys
 import time
 
-
 # --- CONFIGURATION ---
-MARGIN = 20
-SENSITIVITY = 1.8
+FRAME_REDUCTION = 100  # The safety margin (Active Zone)
+SENSITIVITY = 1.0  # Leave at 1.0 for 1:1 mapping
 SCROLL_SPEED = 8
 DEADZONE = 40
+WINDOW_NAME = "V.E.R.A. Vision Interface"
 
-# --- VISUAL THEME (BGR Colors) ---
-CYAN = (255, 255, 0)  # Note: OpenCV uses BGR, not RGB
-GREEN = (0, 255, 0)
-RED = (0, 0, 255)
-DARK_GREEN = (0, 100, 0)
+# --- PRO THEME (BGR) ---
+COL_WHITE = (245, 245, 245)
+COL_GRAY = (50, 50, 50)
+COL_CYAN = (255, 200, 0)  # Deep Cyan/Blue
+COL_RED = (50, 50, 255)  # Active Action
+COL_DARK = (20, 20, 20)  # HUD Backgrounds
 
 # --- SETUP ---
 pyautogui.PAUSE = 0
 pyautogui.FAILSAFE = False
+
+# --- MODERN IMPORT BLOCK (The Fix) ---
 try:
-    from mediapipe.python.solutions import hands as mp_hands
-    from mediapipe.python.solutions import drawing_utils as mp_drawing
-except ImportError:
-    import mediapipe.solutions.hands as mp_hands
-    import mediapipe.solutions.drawing_utils as mp_drawing
+    mp_hands = mp.solutions.hands
+    mp_drawing = mp.solutions.drawing_utils
+    mp_styles = mp.solutions.drawing_styles
+except Exception as e:
+    print(f"CRITICAL IMPORT ERROR: {e}")
+    sys.exit(1)
 
 hands = mp_hands.Hands(
-    max_num_hands=1, model_complexity=0, min_detection_confidence=0.6
+    max_num_hands=1, model_complexity=0, min_detection_confidence=0.7
 )
 
+# Camera: Force DSHOW for speed
 cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+if not cap.isOpened():
+    cap = cv2.VideoCapture(0)
+
 cap.set(3, 640)
 cap.set(4, 480)
 
+# Monitor Stats
 screen_w, screen_h = pyautogui.size()
 prev_x, prev_y = 0, 0
 is_pinched = False
+p_time = 0
 
-print(">> V.E.R.A. VISION SYSTEM: ONLINE")
+cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+print(">> V.E.R.A. VISION: PRO MODE ACTIVE")
 
 
-def draw_hud_overlay(img, w, h):
-    """Draws the static Sci-Fi elements."""
-    # 1. Corner Brackets (The "Scope" look)
-    length = 40
-    thickness = 2
+def draw_corner_rect(img, x, y, w, h, color, length=20, thickness=2):
+    """Draws only the corners of a rectangle for a cleaner look."""
     # Top Left
-    cv2.line(img, (10, 10), (10 + length, 10), CYAN, thickness)
-    cv2.line(img, (10, 10), (10, 10 + length), CYAN, thickness)
+    cv2.line(img, (x, y), (x + length, y), color, thickness)
+    cv2.line(img, (x, y), (x, y + length), color, thickness)
     # Top Right
-    cv2.line(img, (w - 10, 10), (w - 10 - length, 10), CYAN, thickness)
-    cv2.line(img, (w - 10, 10), (w - 10, 10 + length), CYAN, thickness)
+    cv2.line(img, (x + w, y), (x + w - length, y), color, thickness)
+    cv2.line(img, (x + w, y), (x + w, y + length), color, thickness)
     # Bottom Left
-    cv2.line(img, (10, h - 10), (10 + length, h - 10), CYAN, thickness)
-    cv2.line(img, (10, h - 10), (10, h - 10 - length), CYAN, thickness)
+    cv2.line(img, (x, y + h), (x + length, y + h), color, thickness)
+    cv2.line(img, (x, y + h), (x, y + h - length), color, thickness)
     # Bottom Right
-    cv2.line(img, (w - 10, h - 10), (w - 10 - length, h - 10), CYAN, thickness)
-    cv2.line(img, (w - 10, h - 10), (w - 10, h - 10 - length), CYAN, thickness)
+    cv2.line(img, (x + w, y + h), (x + w - length, y + h), color, thickness)
+    cv2.line(img, (x + w, y + h), (x + w, y + h - length), color, thickness)
 
-    # 2. Status Text
+
+def draw_pro_hud(img, fps, mode, x_curr, y_curr):
+    h, w, _ = img.shape
+
+    # 1. Top Status Bar (Semi-transparent)
+    overlay = img.copy()
+    cv2.rectangle(overlay, (0, 0), (w, 35), COL_DARK, -1)
+    cv2.addWeighted(overlay, 0.8, img, 0.2, 0, img)
+
+    # 2. Text Info
+    font = cv2.FONT_HERSHEY_SIMPLEX
+
+    # Left: System Name
     cv2.putText(
         img,
-        "OPTICAL SENSORS: ONLINE",
-        (25, 35),
-        cv2.FONT_HERSHEY_SIMPLEX,
+        "V.E.R.A. OS // OPTICAL LINK",
+        (15, 22),
+        font,
         0.5,
-        GREEN,
+        COL_WHITE,
         1,
+        cv2.LINE_AA,
     )
-    cv2.putText(
-        img,
-        "TRACKING PROTOCOL: ACTIVE",
-        (w - 240, 35),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.5,
-        GREEN,
-        1,
-    )
+
+    # Right: Telemetry
+    stats = f"FPS: {int(fps)} | POS: {int(x_curr)},{int(y_curr)}"
+    cv2.putText(img, stats, (w - 230, 22), font, 0.5, COL_CYAN, 1, cv2.LINE_AA)
+
+    # 3. Mode Indicator (Bottom Center)
+    if mode != "IDLE":
+        cv2.rectangle(img, (w // 2 - 60, h - 40), (w // 2 + 60, h - 10), COL_DARK, -1)
+
+        color = COL_RED if mode == "CLICK" else COL_CYAN
+        cv2.putText(img, mode, (w // 2 - 20, h - 18), font, 0.6, color, 1, cv2.LINE_AA)
+
+    # 4. Active Region Markers (The "Workspace")
+    box_x = FRAME_REDUCTION
+    box_y = FRAME_REDUCTION
+    box_w = w - (FRAME_REDUCTION * 2)
+    box_h = h - (FRAME_REDUCTION * 2)
+
+    draw_corner_rect(img, box_x, box_y, box_w, box_h, COL_CYAN, length=15, thickness=1)
+
+
+def draw_crosshair(img, x, y, active=False):
+    """Draws a precision sniper-style crosshair."""
+    color = COL_RED if active else COL_WHITE
+    size = 15
+
+    # Main Lines
+    cv2.line(img, (x - size, y), (x + size, y), color, 1)
+    cv2.line(img, (x, y - size), (x, y + size), color, 1)
+
+    # Outer Circle
+    cv2.circle(img, (x, y), 10, color, 1)
+
+    if active:
+        # Solid center dot for click confirmation
+        cv2.circle(img, (x, y), 4, color, -1)
 
 
 while True:
+    # Check for X button close
+    if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_VISIBLE) < 1:
+        break
+
     success, img = cap.read()
     if not success:
         break
 
-    # Flip for mirror effect
+    # Mirror and Filter
     img = cv2.flip(img, 1)
 
-    # --- COOL FILTER EFFECT ---
-    # Darken the background slightly to make the UI pop
-    img = cv2.convertScaleAbs(img, alpha=0.8, beta=0)
+    # Make the image slightly "cooler" (Blue tint for tech feel)
+    img[:, :, 2] = np.clip(img[:, :, 2] * 0.9, 0, 255)
 
     h, w, c = img.shape
-    centerY = h // 2
 
-    # Draw Static HUD
-    draw_hud_overlay(img, w, h)
+    # FPS Calculation
+    c_time = time.time()
+    fps = 1 / (c_time - p_time) if p_time > 0 else 0
+    p_time = c_time
 
-    # DRAW EQUATOR (The "Laser Grid")
-    cv2.line(img, (0, centerY), (w, centerY), CYAN, 1)
-    cv2.putText(
-        img, "SCROLL THRESHOLD", (10, centerY - 5), cv2.FONT_HERSHEY_PLAIN, 1, CYAN, 1
-    )
-
-    # Deadzone Box (Subtle)
-    cv2.line(
-        img,
-        (w // 2 - 50, centerY - DEADZONE),
-        (w // 2 + 50, centerY - DEADZONE),
-        DARK_GREEN,
-        1,
-    )
-    cv2.line(
-        img,
-        (w // 2 - 50, centerY + DEADZONE),
-        (w // 2 + 50, centerY + DEADZONE),
-        DARK_GREEN,
-        1,
-    )
+    current_mode = "IDLE"
+    target_x, target_y = 0, 0
 
     rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     results = hands.process(rgb_img)
@@ -128,62 +162,54 @@ while True:
         for hand_lms in results.multi_hand_landmarks:
             lm = hand_lms.landmark
 
+            # Draw Skeleton (Clean Style)
+            mp_drawing.draw_landmarks(
+                img,
+                hand_lms,
+                mp_hands.HAND_CONNECTIONS,
+                mp_styles.get_default_hand_landmarks_style(),
+                mp_styles.get_default_hand_connections_style(),
+            )
+
+            # Coordinates
             x1, y1 = int(lm[8].x * w), int(lm[8].y * h)  # Index
             x_thumb, y_thumb = int(lm[4].x * w), int(lm[4].y * h)  # Thumb
 
-            # Draw "Targeting Box" around the finger
-            cv2.rectangle(img, (x1 - 15, y1 - 15), (x1 + 15, y1 + 15), GREEN, 1)
-            cv2.line(img, (x1, y1 - 20), (x1, y1 + 20), GREEN, 1)  # Crosshair V
-            cv2.line(img, (x1 - 20, y1), (x1 + 20, y1), GREEN, 1)  # Crosshair H
-
-            # Logic Vars
+            # Logic
             index_up = lm[8].y < lm[6].y
             middle_up = lm[12].y < lm[10].y
 
-            # --- MODE 1: POINTER ---
+            # --- CURSOR ---
             if index_up and not middle_up:
-                cv2.putText(
-                    img,
-                    "MODE: CURSOR",
-                    (w // 2 - 60, h - 30),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    CYAN,
-                    2,
+                current_mode = "NAV"
+
+                # Map active region to screen
+                x_mapped = np.interp(
+                    x1, (FRAME_REDUCTION, w - FRAME_REDUCTION), (0, screen_w)
+                )
+                y_mapped = np.interp(
+                    y1, (FRAME_REDUCTION, h - FRAME_REDUCTION), (0, screen_h)
                 )
 
-                # Move Mouse
-                x_virtual = np.interp(
-                    x1, (MARGIN, w - MARGIN), (0, screen_w * SENSITIVITY)
-                )
-                y_virtual = np.interp(
-                    y1, (MARGIN, h - MARGIN), (0, screen_h * SENSITIVITY)
-                )
+                # Clamp
+                target_x = max(0, min(screen_w - 1, x_mapped))
+                target_y = max(0, min(screen_h - 1, y_mapped))
 
-                x_final = x_virtual - (screen_w * (SENSITIVITY - 1) / 2)
-                y_final = y_virtual - (screen_h * (SENSITIVITY - 1) / 2)
-
-                curr_x = prev_x + (x_final - prev_x) / 3
-                curr_y = prev_y + (y_final - prev_y) / 3
+                # Smooth
+                curr_x = prev_x + (target_x - prev_x) / 4
+                curr_y = prev_y + (target_y - prev_y) / 4
 
                 try:
                     pyautogui.moveTo(curr_x, curr_y)
                 except:
                     pass
+
                 prev_x, prev_y = curr_x, curr_y
 
-                # Click Logic
+                # Click
                 dist = ((x1 - x_thumb) ** 2 + (y1 - y_thumb) ** 2) ** 0.5
                 if dist < 30:
-                    cv2.putText(
-                        img,
-                        "CLICK",
-                        (x1 + 20, y1),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        RED,
-                        2,
-                    )
+                    current_mode = "CLICK"
                     if not is_pinched:
                         pyautogui.mouseDown()
                         is_pinched = True
@@ -192,55 +218,32 @@ while True:
                         pyautogui.mouseUp()
                         is_pinched = False
 
-            # --- MODE 2: SCROLL ---
+                draw_crosshair(img, x1, y1, active=is_pinched)
+
+            # --- SCROLL ---
             elif index_up and middle_up:
+                current_mode = "SCROLL"
+
+                # Vertical Center Line
+                centerY = h // 2
                 distance = centerY - y1
+
+                # Draw Scroll UI
+                cv2.line(img, (w // 2, centerY), (w // 2, y1), COL_CYAN, 2)
 
                 if abs(distance) > DEADZONE:
                     speed = int(np.interp(abs(distance), (DEADZONE, 150), (0, 20)))
-
                     if distance > 0:
                         pyautogui.scroll(-speed * SCROLL_SPEED)
-                        cv2.arrowedLine(
-                            img, (x1, y1), (x1, y1 + 50), GREEN, 3
-                        )  # Arrow Down
-                        cv2.putText(
-                            img,
-                            "SCROLLING DOWN",
-                            (w // 2 - 80, h - 30),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.7,
-                            GREEN,
-                            2,
-                        )
                     else:
                         pyautogui.scroll(speed * SCROLL_SPEED)
-                        cv2.arrowedLine(
-                            img, (x1, y1), (x1, y1 - 50), GREEN, 3
-                        )  # Arrow Up
-                        cv2.putText(
-                            img,
-                            "SCROLLING UP",
-                            (w // 2 - 80, h - 30),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.7,
-                            GREEN,
-                            2,
-                        )
-                else:
-                    cv2.putText(
-                        img,
-                        "HOLD",
-                        (w // 2 - 30, h - 30),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.7,
-                        RED,
-                        2,
-                    )
 
-    cv2.imshow("V.E.R.A. Vision V9", img)
+    draw_pro_hud(img, fps, current_mode, prev_x, prev_y)
+
+    cv2.imshow(WINDOW_NAME, img)
     if cv2.waitKey(1) & 0xFF == ord("q"):
         break
 
 cap.release()
 cv2.destroyAllWindows()
+sys.exit()
