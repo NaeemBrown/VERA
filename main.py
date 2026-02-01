@@ -1,240 +1,113 @@
-import speech_recognition as sr
-import sys
+import asyncio
+import edge_tts
+import pygame
 import os
-import time
-import threading
-import subprocess
-import pyttsx3
-import datetime
-
-# --- IMPORTS ---
-import skills
-import security_ops
-import admin
-import tools
-import volume_ops
-import work_ops
-import window_ops
+import sys
 import ai_ops
-import app_ops
-import voice_engine
+import datetime
+import psutil
+import threading
 
-# --- STATE ---
-LAST_INTERACTION = 0
-hand_mouse_process = None
+# Hooks for the UI
+gui_popup_hook = None
+gui_stats_hook = None
+toggle_hand_mouse = None
 
-
-# --- OUTPUT HANDLERS ---
-def gui_popup_hook(text):
-    print(f"POPUP: {text}")
-
-
-def gui_stats_hook(data):
-    print(f"STATS: {data}")
-
-
-# Placeholder hook that interface.py will override
-def gui_cam_hook():
-    return None
+# --- AUDIO SYSTEM ---
+VOICE = "en-GB-SoniaNeural"
+OUTPUT_FILE = "speech.mp3"
 
 
 def speak(text):
-    voice_engine.speak(text)
-
-
-def reply(text, user_command):
-    gui_popup_hook(text)
-    speak(text)
-
-
-def threaded_action(target_function, *args):
-    t = threading.Thread(target=target_function, args=args)
-    t.daemon = True
-    t.start()
-
-
-# --- HAND MOUSE CONTROLLER ---
-def toggle_hand_mouse():
-    global hand_mouse_process
-
-    # 1. Check if it's already running
-    if hand_mouse_process and hand_mouse_process.poll() is None:
-        hand_mouse_process.terminate()
-        hand_mouse_process = None
-        speak("Vision systems offline.")
+    """Generates and plays audio."""
+    if not text:
         return
+    print(f"VERA: {text}")  # Debug print
 
-    # 2. Define the path dynamically
-    # sys.executable ensures we use the SAME venv that is running main.py
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    script_path = os.path.join(current_dir, "hand_mouse_equator.py")
+    # 1. Update UI (If connected)
+    if gui_popup_hook:
+        try:
+            gui_popup_hook(text)
+        except Exception as e:
+            print(f"UI Hook Error: {e}")
 
-    speak("Engaging optical sensors.")
-
+    # 2. Generate Audio
     try:
-        # 3. Launch the process
-        # subprocess.CREATE_NEW_CONSOLE makes it pop up in its own cool window
-        hand_mouse_process = subprocess.Popen(
-            [sys.executable, script_path],
-            cwd=current_dir,
-            creationflags=subprocess.CREATE_NEW_CONSOLE,
-        )
+        communicate = edge_tts.Communicate(text, VOICE, rate="+15%")
+        asyncio.run(communicate.save(OUTPUT_FILE))
+
+        pygame.mixer.init()
+        pygame.mixer.music.load(OUTPUT_FILE)
+        pygame.mixer.music.play()
+
+        while pygame.mixer.music.get_busy():
+            pygame.time.Clock().tick(10)
+
+        pygame.mixer.music.unload()
     except Exception as e:
-        print(f"VISION LAUNCH ERROR: {e}")
-        speak("Optical sensors failed to initialize.")
+        print(f"Audio Error: {e}")
 
 
-def process_command(command, source):
-    global LAST_INTERACTION
+def get_time():
+    now = datetime.datetime.now()
+    return now.strftime("It is %H:%M.")
 
-    # --- HAND MOUSE PRIORITY ---
-    triggers = [
-        "activate mouse",
-        "hand mouse",
-        "start camera",
-        "hand camera",
-        "gesture",
-        "tracking",
-    ]
-    if any(phrase in command for phrase in triggers):
-        status = toggle_hand_mouse()
-        if status:
-            speak(status)
-        return
 
-    # --- MEDIA CONTROLS ---
-    elif "stop" in command or "pause" in command or "resume" in command:
-        skills.media_play_pause()
-        return
-    elif "next song" in command or "skip" in command:
-        skills.media_next()
-        return
-    elif "previous song" in command or "go back" in command:
-        skills.media_prev()
-        return
-    elif "volume" in command or "mute" in command:
-        volume_ops.handle_volume_command(command, speak)
+def get_system_stats():
+    cpu = psutil.cpu_percent(interval=None)
+    ram = psutil.virtual_memory().percent
+    battery = psutil.sensors_battery()
+    plugged = "Plugged In" if battery and battery.power_plugged else "Battery"
+    percent = battery.percent if battery else 100
+    return {"cpu": cpu, "ram": ram, "battery": percent}
+
+
+def process_command(command, source=None):
+    """The Central Logic Hub"""
+    if not command:
         return
 
-    # --- SPECIFIC CAMERA CONTROLS ---
-    elif "close camera" in command or "stop vision" in command:
-        if hand_mouse_process:
-            speak("Deactivating vision systems.")
-            toggle_hand_mouse()  # This toggles it OFF
-        else:
-            speak("Camera is not active.")
-        return
-
-    elif "minimize camera" in command or "hide camera" in command:
-        # The window title is set in hand_mouse_equator.py as "V.E.R.A. Vision V9"
-        found = window_ops.minimize_window("V.E.R.A. Vision V9")
-        if found:
-            speak("Minimizing vision feed.")
-        else:
-            speak("I can't find the camera window.")
-        return
-
-    # --- WINDOW MANAGEMENT ---
-    elif "maximize" in command:
-        target = command.replace("maximize", "").strip()
-        window_ops.maximize_window(target)
-        return
-    elif "snap" in command:
-        target = (
-            command.replace("snap", "").replace("left", "").replace("right", "").strip()
-        )
-        direction = "right" if "right" in command else "left"
-        window_ops.snap_window(target, direction)
-        return
-
-    # --- APP CONTROL ---
-    elif "open" in command:
-        target = command.replace("open", "").strip()
-        if target:
-            speak(f"Opening {target}...")
-            threaded_action(app_ops.open_application, target)
-        return
-    elif "close" in command:
-        target = command.replace("close", "").strip()
-        if target:
-            speak(f"Closing {target}...")
-            app_ops.close_application(target)
-        return
-
-    # --- UTILITIES ---
-    elif "screenshot" in command:
-        threaded_action(skills.take_screenshot)
-        speak("Saved.")
-        return
-    elif "read clipboard" in command:
-        threaded_action(skills.read_clipboard, speak)
-        return
-    elif "note" in command:
-        text = command.split("note", 1)[1].strip() if "note" in command else ""
-        if text:
-            skills.save_note(text)
-            speak("Saved.")
-        return
-    elif "sentry mode" in command or "trap" in command:
-        security_ops.engage_sentry_mode(speak)
-        return
-    elif "exit" in command:
-        speak("Goodbye Sir.")
-
-        if hand_mouse_process:
-            try:
-                hand_mouse_process.terminate()
-            except:
-                pass
-
-        os._exit(0)
-
-    # --- SMART ROUTER ---
+    # 1. IDENTIFY INTENT
     intent = ai_ops.identify_intent(command)
+    print(f"DEBUG: Intent = {intent}")
 
-    if "system status" in command or "stats" in command:
-        data = admin.get_system_status()
-        gui_stats_hook(data)
-        speak(data["speech"])
-        return
-    elif intent == "CMD_SEE":
-        speak("Analyzing screen...")
-        analysis = ai_ops.see_screen(command)
-        reply(analysis, command)
-    elif intent == "CMD_CAM":
-        speak("Visual sensors active.")
-        analysis = ai_ops.see_camera(command)
-        reply(analysis, command)
-    elif intent == "CMD_TIME":
-        now = datetime.datetime.now().strftime("%H:%M")
-        reply(f"The time is {now}", command)
-    elif intent == "CMD_MUSIC":
-        clean_name = command.replace("play", "").replace("put on", "").strip()
-        threaded_action(skills.play_music, clean_name)
-        speak(f"Playing {clean_name}.")
-    elif intent == "CMD_CHAT" or intent == "UNKNOWN":
-        response = ai_ops.ask_brain(command)
-        reply(response, command)
+    response = ""
 
+    # 2. EXECUTE
+    try:
+        if intent == "CMD_SEE":
+            speak("Analyzing visual data...")
+            response = ai_ops.see_screen(command)
 
-# --- MAIN LOOP ---
-recognizer = sr.Recognizer()
-recognizer.pause_threshold = 0.8
+        elif intent == "CMD_CAM":
+            speak("Accessing optical sensors...")
+            response = ai_ops.see_camera(command)
 
+        elif intent == "CMD_TIME":
+            response = get_time()
 
-def main():
-    with sr.Microphone() as source:
-        print(">> CALIBRATING MIC...")
-        recognizer.adjust_for_ambient_noise(source, duration=1.0)
-        speak("V.E.R.A. online.")
-        while True:
-            try:
-                audio = recognizer.listen(source, timeout=None, phrase_time_limit=10)
-                command = recognizer.recognize_google(audio, language="en-ZA").lower()
-                process_command(command, source)
-            except:
-                continue
+        elif intent == "CMD_MUSIC":
+            speak("I do not have a music module installed yet.")
+            return
 
+        elif "hand mouse" in command or "vision" in command:
+            if toggle_hand_mouse:
+                status = toggle_hand_mouse()
+                return
 
-if __name__ == "__main__":
-    main()
+        elif "system" in command or "status" in command:
+            stats = get_system_stats()
+            if gui_stats_hook:
+                gui_stats_hook(stats)
+            response = f"CPU at {stats['cpu']} percent. RAM at {stats['ram']} percent."
+
+        else:
+            # Default: Chat
+            response = ai_ops.ask_brain(command)
+
+        # 3. RESPOND
+        speak(response)
+
+    except Exception as e:
+        print(f"Logic Error: {e}")
+        speak("I encountered an internal error.")
