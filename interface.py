@@ -46,7 +46,7 @@ class JarvisUI:
         self.container = tk.Frame(self.root, bg=COL_TRANS)
         self.container.pack(fill="both", expand=True)
 
-        # --- 1. THE AVATAR TILE (Always Visible) ---
+        # --- 1. THE AVATAR TILE ---
         self.tile = ctk.CTkFrame(
             self.container,
             width=100,
@@ -58,11 +58,10 @@ class JarvisUI:
         )
         self.tile.pack(side="top", anchor="e", padx=10, pady=(0, 5))
 
-        # Avatar Image Holder
         self.lbl_gif = tk.Label(self.tile, bg=COL_BG, borderwidth=0)
         self.lbl_gif.place(relx=0.5, rely=0.5, anchor="center")
 
-        # --- 2. SPEECH BUBBLE (Hidden Dropdown) ---
+        # --- 2. SPEECH BUBBLE ---
         self.bubble = ctk.CTkFrame(
             self.container,
             width=300,
@@ -72,7 +71,6 @@ class JarvisUI:
             border_width=1,
             border_color="#333333",
         )
-        # Note: We don't pack it yet.
 
         self.lbl_text = ctk.CTkLabel(
             self.bubble,
@@ -90,12 +88,12 @@ class JarvisUI:
         except:
             self.lbl_gif.configure(text="●", font=("Arial", 40), fg="white", bg=COL_BG)
 
-        # --- HOOKS ---
+        # --- HOOKS (Linking to main.py) ---
         main.gui_popup_hook = self.thread_safe_speech
         main.gui_stats_hook = self.thread_safe_stats
         main.toggle_hand_mouse = self.toggle_vision
+        main.shutdown_hook = self.close_app  # <--- Linked for remote shutdown
 
-        # --- STARTUP FLASH (Visual Confirmation) ---
         self.flash_boot()
 
         # --- START THREADS ---
@@ -105,7 +103,19 @@ class JarvisUI:
 
         self.root.mainloop()
 
-    # --- THREAD SAFETY WRAPPERS ---
+    # --- SHUTDOWN SEQUENCE ---
+    def close_app(self):
+        """Kills the UI and forces the process to end."""
+        print("DEBUG: Terminating Session...")
+        if self.vision_process and self.vision_process.poll() is None:
+            self.vision_process.terminate()
+
+        # We use root.after to ensure the destroy happens in the main thread
+        self.root.after(0, self.root.destroy)
+        # Nuclear option to kill the background voice thread too
+        os._exit(0)
+
+    # --- THREAD SAFETY ---
     def thread_safe_speech(self, text):
         self.root.after(0, lambda: self.show_speech(text))
 
@@ -117,7 +127,6 @@ class JarvisUI:
 
     # --- VISUALS ---
     def flash_boot(self):
-        """Flashes the border white on startup to prove it's alive."""
         self.tile.configure(border_color="white")
         self.root.after(500, lambda: self.tile.configure(border_color=COL_BORDER_IDLE))
 
@@ -129,18 +138,11 @@ class JarvisUI:
             color = COL_BORDER_WORK
         elif state == "vision":
             color = COL_BORDER_CAM
-
         self.tile.configure(border_color=color)
 
-    # --- SPEECH BUBBLE LOGIC ---
     def show_speech(self, text):
         self.set_state("speaking")
-
-        # Show bubble (Drop down below avatar)
         self.bubble.pack(side="top", anchor="e", padx=10, pady=5)
-        self.lbl_text.configure(text="")
-
-        # Typewriter
         self.type_char(text, 0)
 
     def type_char(self, full_text, index):
@@ -148,7 +150,6 @@ class JarvisUI:
             self.lbl_text.configure(text=full_text[: index + 1])
             self.root.after(15, lambda: self.type_char(full_text, index + 1))
         else:
-            # Auto-hide based on length
             delay = 2000 + (len(full_text) * 40)
             self.root.after(delay, self.hide_speech)
 
@@ -157,19 +158,18 @@ class JarvisUI:
         if self.vision_process is None:
             self.set_state("idle")
 
-    # --- STATS ---
     def show_stats(self, data):
         self.show_speech(f"CPU: {data['cpu']}% | RAM: {data['ram']}%")
 
-    # --- GIF ENGINE ---
+    # --- ANIMATION ---
     def load_gif(self, path):
         if not os.path.exists(path):
             return
         img = Image.open(path)
-        self.frames = []
-        for frame in ImageSequence.Iterator(img):
-            frame = frame.resize((80, 80))
-            self.frames.append(ImageTk.PhotoImage(frame))
+        self.frames = [
+            ImageTk.PhotoImage(frame.resize((80, 80)))
+            for frame in ImageSequence.Iterator(img)
+        ]
         self.frame_cycle = itertools.cycle(self.frames)
         self.animate_gif()
 
@@ -180,7 +180,7 @@ class JarvisUI:
         except:
             pass
 
-    # --- VISION LOGIC ---
+    # --- TOOLS ---
     def toggle_vision(self):
         if self.vision_process and self.vision_process.poll() is None:
             self.vision_process.terminate()
@@ -189,41 +189,35 @@ class JarvisUI:
             self.thread_safe_state("idle")
             return
 
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        script_path = os.path.join(current_dir, "hand_mouse_equator.py")
-
+        script_path = os.path.join(os.path.dirname(__file__), "hand_mouse_equator.py")
         main.speak("Vision engaged.")
         self.thread_safe_state("vision")
-
         try:
             self.vision_process = subprocess.Popen(
                 [sys.executable, script_path],
-                cwd=current_dir,
                 creationflags=subprocess.CREATE_NEW_CONSOLE,
             )
         except Exception as e:
             print(e)
-        return "Active"
 
     # --- VOICE LOOP ---
     def run_voice_loop(self):
         recognizer = sr.Recognizer()
-        recognizer.pause_threshold = 0.5
+        recognizer.pause_threshold = 0.6
+        recognizer.dynamic_energy_threshold = True
         recognizer.non_speaking_duration = 0.3
 
         with sr.Microphone() as source:
             try:
-                recognizer.adjust_for_ambient_noise(source, duration=0.5)
+                recognizer.adjust_for_ambient_noise(source, duration=1.0)
             except:
                 pass
 
-            main.speak("Online.")
+            main.speak("Online and listening.")
 
             while True:
                 try:
                     audio = recognizer.listen(source, timeout=None)
-
-                    # Use thread_safe call for UI update
                     self.thread_safe_state("working")
 
                     command = recognizer.recognize_google(
@@ -231,19 +225,18 @@ class JarvisUI:
                     ).lower()
                     print(f"User: {command}")
 
+                    # Check for exit phrase locally to speed up shutdown
+                    if any(
+                        x in command
+                        for x in ["shutdown", "terminate session", "exit program"]
+                    ):
+                        main.process_command(command, source)
+                        break
+
                     main.process_command(command, source)
 
-                    # Reset check (Only if bubble closed)
-                    if not self.bubble.winfo_ismapped() and self.vision_process is None:
-                        self.thread_safe_state("idle")
-
-                except sr.UnknownValueError:
-                    if self.vision_process is None:
-                        self.thread_safe_state("idle")
-                    continue
-                except:
-                    if self.vision_process is None:
-                        self.thread_safe_state("idle")
+                except Exception as e:
+                    print(f"Loop Error: {e}")
                     continue
 
 
