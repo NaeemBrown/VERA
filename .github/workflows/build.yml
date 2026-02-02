@@ -24,20 +24,21 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install wheel
         
-        # 1. Install pipwin and refresh the cache (Crucial Step)
+        # 1. Handling PyAudio for Windows Runners
         pip install pipwin
         pipwin refresh
         pipwin install pyaudio
         
-        # 2. Install the rest
+        # 2. Install core requirements
+        # Make sure 'typing' is NOT in your requirements.txt!
         pip install -r requirements.txt
         pip install pyinstaller
 
     - name: Build VERA Executable
       run: |
-        # --clean clears the cache
-        # --hidden-import=pyaudio forces the audio driver to load
-        pyinstaller --name VERA_OS --onefile --windowed --clean --add-data "head.gif;." --collect-all customtkinter --hidden-import=comtypes.stream --hidden-import=pyaudio interface.py
+        # Fixed path to ui/hologram.py and added folder bundling
+        # Excluded heavy ML modules to prevent the build from crashing/bloating
+        python -m PyInstaller --name VERA_OS --onefile --windowed --clean --add-data "assets;assets" --add-data "data;data" --collect-all customtkinter --hidden-import=pyaudio --exclude-module torch --exclude-module tensorflow --exclude-module PyQt5 --exclude-module PyQt6 ui/hologram.py
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
@@ -45,9 +46,7 @@ jobs:
         name: VERA_Release_Build
         path: dist/VERA_OS.exe
 
-  # --- QUALITY ASSURANCE GATE ---
     - name: Run Integration Suite
       run: |
         pip install pytest
-        # Run specific professional suite
-        pytest tests/test_integration.py      
+        pytest tests/test_integration.py
