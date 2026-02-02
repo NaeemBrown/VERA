@@ -1,0 +1,68 @@
+=========================================
+          VERA COMMAND MANUAL
+=========================================
+
+--- SYSTEM & MAINTENANCE ---
+"Vera, scan for apps."
+    -> Triggers the file system crawler.
+    -> Updates app_library.json with new shortcuts.
+    -> RUN THIS whenever you install new software.
+
+"Shutdown" / "Terminate" / "Exit Program"
+    -> Safely kills the GUI, Background Threads, and Python Process.
+
+"Status" / "System Check"
+    -> Reads out CPU, RAM, and Battery levels.
+
+"What time is it?"
+    -> Reads current system time.
+
+--- APPS & AUTOMATION (Secured by Voice ID) ---
+"Open [App Name]"
+    -> Checks Whitelist first (Calc, Notepad, Code, Spotify, etc.).
+    -> If not in whitelist, checks the App Index (requires 'Scan' first).
+    -> Example: "Open Blender", "Launch Steam".
+
+"Open [Website]"
+    -> Opens default browser to the URL.
+    -> Example: "Open Google", "Open Reddit".
+
+"Play [Song/Genre]"
+    -> Opens YouTube Music and searches for the term.
+    -> Example: "Play Lo-Fi hip hop", "Play my supermix".
+
+--- TYPING & AUTOFILL (Secured by Voice ID) ---
+"Type my email"
+    -> Types: naeem@example.com
+
+"Type my username"
+    -> Types: NaeemDev
+
+"Type my address"
+    -> Types: Cape Town, SA
+
+"Type [Custom Text]"
+    -> Types whatever you say after "Type".
+    -> Example: "Type hello world", "Type password123".
+
+--- VISION (EYES) ---
+"Look at my screen" / "What's on the screen?"
+    -> Takes a screenshot and analyzes it with Gemini Vision.
+
+"Check the camera" / "What do you see?"
+    -> Turns on the webcam, takes 5 frames, and analyzes the image.
+
+--- CHAT MODES ---
+"Hello" / "Tell me a joke"
+    -> Uses Llama-8B (Fast Mode). Instant response.
+
+"Write python code for..." / "Explain quantum physics..."
+    -> Uses Llama-70B (Smart Mode).
+    -> Vera will say "Let me think..." before processing.
+
+=========================================
+NOTES:
+1. Dangerous commands (Open/Type) require Voice Verification.
+2. If she ignores a command, check if your microphone volume is too low.
+3. If she cuts you off, increase 'SUSTAIN_DURATION' in main.py.
+=========================================
