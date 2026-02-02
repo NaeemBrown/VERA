@@ -18,3 +18,4 @@ except ImportError as e:
 if __name__ == "__main__":
     print(">> SYSTEM: Initializing V.E.R.A. Kernel...")
     app = VeraHologram()
+# build fixed
