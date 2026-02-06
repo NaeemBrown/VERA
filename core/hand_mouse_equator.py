@@ -7,14 +7,12 @@ import time
 
 # --- CONFIGURATION ---
 FRAME_REDUCTION = 100  # The safety margin (Active Zone)
-SENSITIVITY = 1.0  # Leave at 1.0 for 1:1 mapping
-SCROLL_SPEED = 8
-DEADZONE = 40
+SCROLL_SPEED = 5  # Adjusted for smoother scrolling
+DEADZONE = 40  # Neutral zone size
 WINDOW_NAME = "V.E.R.A. Vision Interface"
 
-# --- PRO THEME (BGR) ---
+# --- THEME (BGR) ---
 COL_WHITE = (245, 245, 245)
-COL_GRAY = (50, 50, 50)
 COL_CYAN = (255, 200, 0)  # Deep Cyan/Blue
 COL_RED = (50, 50, 255)  # Active Action
 COL_DARK = (20, 20, 20)  # HUD Backgrounds
@@ -23,39 +21,21 @@ COL_DARK = (20, 20, 20)  # HUD Backgrounds
 pyautogui.PAUSE = 0
 pyautogui.FAILSAFE = False
 
-# --- MODERN IMPORT BLOCK (The Fix) ---
+# --- INIT MEDIAPIPE ---
 try:
     mp_hands = mp.solutions.hands
     mp_drawing = mp.solutions.drawing_utils
     mp_styles = mp.solutions.drawing_styles
+    hands = mp_hands.Hands(
+        max_num_hands=1, model_complexity=0, min_detection_confidence=0.7
+    )
 except Exception as e:
     print(f"CRITICAL IMPORT ERROR: {e}")
     sys.exit(1)
 
-hands = mp_hands.Hands(
-    max_num_hands=1, model_complexity=0, min_detection_confidence=0.7
-)
-
-# Camera: Force DSHOW for speed
-cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-if not cap.isOpened():
-    cap = cv2.VideoCapture(0)
-
-cap.set(3, 640)
-cap.set(4, 480)
-
-# Monitor Stats
-screen_w, screen_h = pyautogui.size()
-prev_x, prev_y = 0, 0
-is_pinched = False
-p_time = 0
-
-cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
-print(">> V.E.R.A. VISION: PRO MODE ACTIVE")
-
 
 def draw_corner_rect(img, x, y, w, h, color, length=20, thickness=2):
-    """Draws only the corners of a rectangle for a cleaner look."""
+    """Draws sleek corners instead of a full box."""
     # Top Left
     cv2.line(img, (x, y), (x + length, y), color, thickness)
     cv2.line(img, (x, y), (x, y + length), color, thickness)
@@ -70,180 +50,180 @@ def draw_corner_rect(img, x, y, w, h, color, length=20, thickness=2):
     cv2.line(img, (x + w, y + h), (x + w, y + h - length), color, thickness)
 
 
-def draw_pro_hud(img, fps, mode, x_curr, y_curr):
+def draw_hud(img, fps, mode, x, y):
     h, w, _ = img.shape
 
-    # 1. Top Status Bar (Semi-transparent)
+    # Header
     overlay = img.copy()
     cv2.rectangle(overlay, (0, 0), (w, 35), COL_DARK, -1)
     cv2.addWeighted(overlay, 0.8, img, 0.2, 0, img)
 
-    # 2. Text Info
-    font = cv2.FONT_HERSHEY_SIMPLEX
-
-    # Left: System Name
+    # Text
     cv2.putText(
         img,
-        "V.E.R.A. OS // OPTICAL LINK",
+        "V.E.R.A. OPTICAL LINK",
         (15, 22),
-        font,
+        cv2.FONT_HERSHEY_SIMPLEX,
         0.5,
         COL_WHITE,
         1,
         cv2.LINE_AA,
     )
+    cv2.putText(
+        img,
+        f"FPS: {int(fps)}",
+        (w - 100, 22),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        COL_CYAN,
+        1,
+        cv2.LINE_AA,
+    )
 
-    # Right: Telemetry
-    stats = f"FPS: {int(fps)} | POS: {int(x_curr)},{int(y_curr)}"
-    cv2.putText(img, stats, (w - 230, 22), font, 0.5, COL_CYAN, 1, cv2.LINE_AA)
-
-    # 3. Mode Indicator (Bottom Center)
+    # Mode Indicator
     if mode != "IDLE":
-        cv2.rectangle(img, (w // 2 - 60, h - 40), (w // 2 + 60, h - 10), COL_DARK, -1)
-
         color = COL_RED if mode == "CLICK" else COL_CYAN
-        cv2.putText(img, mode, (w // 2 - 20, h - 18), font, 0.6, color, 1, cv2.LINE_AA)
+        cv2.putText(
+            img,
+            f"MODE: {mode}",
+            (w // 2 - 40, h - 20),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            color,
+            1,
+            cv2.LINE_AA,
+        )
 
-    # 4. Active Region Markers (The "Workspace")
-    box_x = FRAME_REDUCTION
-    box_y = FRAME_REDUCTION
+    # Active Zone
     box_w = w - (FRAME_REDUCTION * 2)
     box_h = h - (FRAME_REDUCTION * 2)
-
-    draw_corner_rect(img, box_x, box_y, box_w, box_h, COL_CYAN, length=15, thickness=1)
-
-
-def draw_crosshair(img, x, y, active=False):
-    """Draws a precision sniper-style crosshair."""
-    color = COL_RED if active else COL_WHITE
-    size = 15
-
-    # Main Lines
-    cv2.line(img, (x - size, y), (x + size, y), color, 1)
-    cv2.line(img, (x, y - size), (x, y + size), color, 1)
-
-    # Outer Circle
-    cv2.circle(img, (x, y), 10, color, 1)
-
-    if active:
-        # Solid center dot for click confirmation
-        cv2.circle(img, (x, y), 4, color, -1)
+    draw_corner_rect(
+        img,
+        FRAME_REDUCTION,
+        FRAME_REDUCTION,
+        box_w,
+        box_h,
+        COL_CYAN,
+        length=15,
+        thickness=1,
+    )
 
 
-while True:
-    # Check for X button close
-    if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_VISIBLE) < 1:
-        break
+def run_vision_loop():
+    # Camera Setup (Force DSHOW for Windows speed)
+    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    if not cap.isOpened():
+        cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("Error: No Camera Found.")
+        return
 
-    success, img = cap.read()
-    if not success:
-        break
+    cap.set(3, 640)
+    cap.set(4, 480)
 
-    # Mirror and Filter
-    img = cv2.flip(img, 1)
+    screen_w, screen_h = pyautogui.size()
+    prev_x, prev_y = 0, 0
+    p_time = 0
+    is_pinched = False
 
-    # Make the image slightly "cooler" (Blue tint for tech feel)
-    img[:, :, 2] = np.clip(img[:, :, 2] * 0.9, 0, 255)
+    cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(WINDOW_NAME, 320, 240)  # Start small
 
-    h, w, c = img.shape
+    print(">> V.E.R.A. VISION ONLINE")
 
-    # FPS Calculation
-    c_time = time.time()
-    fps = 1 / (c_time - p_time) if p_time > 0 else 0
-    p_time = c_time
+    while True:
+        # Check if window closed
+        if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_VISIBLE) < 1:
+            break
 
-    current_mode = "IDLE"
-    target_x, target_y = 0, 0
+        success, img = cap.read()
+        if not success:
+            break
 
-    rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    results = hands.process(rgb_img)
+        # Flip & Process
+        img = cv2.flip(img, 1)
+        h, w, _ = img.shape
+        rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        results = hands.process(rgb_img)
 
-    if results.multi_hand_landmarks:
-        for hand_lms in results.multi_hand_landmarks:
-            lm = hand_lms.landmark
+        # FPS
+        c_time = time.time()
+        fps = 1 / (c_time - p_time) if p_time > 0 else 0
+        p_time = c_time
 
-            # Draw Skeleton (Clean Style)
-            mp_drawing.draw_landmarks(
-                img,
-                hand_lms,
-                mp_hands.HAND_CONNECTIONS,
-                mp_styles.get_default_hand_landmarks_style(),
-                mp_styles.get_default_hand_connections_style(),
-            )
+        mode = "IDLE"
 
-            # Coordinates
-            x1, y1 = int(lm[8].x * w), int(lm[8].y * h)  # Index
-            x_thumb, y_thumb = int(lm[4].x * w), int(lm[4].y * h)  # Thumb
+        if results.multi_hand_landmarks:
+            for hand_lms in results.multi_hand_landmarks:
+                lm = hand_lms.landmark
+                mp_drawing.draw_landmarks(img, hand_lms, mp_hands.HAND_CONNECTIONS)
 
-            # Logic
-            index_up = lm[8].y < lm[6].y
-            middle_up = lm[12].y < lm[10].y
+                # Coords
+                x1, y1 = int(lm[8].x * w), int(lm[8].y * h)  # Index
+                x2, y2 = int(lm[4].x * w), int(lm[4].y * h)  # Thumb
 
-            # --- CURSOR ---
-            if index_up and not middle_up:
-                current_mode = "NAV"
+                # Fingers Up?
+                index_up = lm[8].y < lm[6].y
+                middle_up = lm[12].y < lm[10].y
 
-                # Map active region to screen
-                x_mapped = np.interp(
-                    x1, (FRAME_REDUCTION, w - FRAME_REDUCTION), (0, screen_w)
-                )
-                y_mapped = np.interp(
-                    y1, (FRAME_REDUCTION, h - FRAME_REDUCTION), (0, screen_h)
-                )
+                # --- MOUSE MODE (Index Up, Middle Down) ---
+                if index_up and not middle_up:
+                    mode = "NAV"
 
-                # Clamp
-                target_x = max(0, min(screen_w - 1, x_mapped))
-                target_y = max(0, min(screen_h - 1, y_mapped))
+                    # Map Coordinates
+                    x_mapped = np.interp(
+                        x1, (FRAME_REDUCTION, w - FRAME_REDUCTION), (0, screen_w)
+                    )
+                    y_mapped = np.interp(
+                        y1, (FRAME_REDUCTION, h - FRAME_REDUCTION), (0, screen_h)
+                    )
 
-                # Smooth
-                curr_x = prev_x + (target_x - prev_x) / 4
-                curr_y = prev_y + (target_y - prev_y) / 4
+                    # Smooth
+                    curr_x = prev_x + (x_mapped - prev_x) / 5
+                    curr_y = prev_y + (y_mapped - prev_y) / 5
 
-                try:
                     pyautogui.moveTo(curr_x, curr_y)
-                except:
-                    pass
+                    prev_x, prev_y = curr_x, curr_y
 
-                prev_x, prev_y = curr_x, curr_y
-
-                # Click
-                dist = ((x1 - x_thumb) ** 2 + (y1 - y_thumb) ** 2) ** 0.5
-                if dist < 30:
-                    current_mode = "CLICK"
-                    if not is_pinched:
-                        pyautogui.mouseDown()
-                        is_pinched = True
-                else:
-                    if is_pinched:
-                        pyautogui.mouseUp()
-                        is_pinched = False
-
-                draw_crosshair(img, x1, y1, active=is_pinched)
-
-            # --- SCROLL ---
-            elif index_up and middle_up:
-                current_mode = "SCROLL"
-
-                # Vertical Center Line
-                centerY = h // 2
-                distance = centerY - y1
-
-                # Draw Scroll UI
-                cv2.line(img, (w // 2, centerY), (w // 2, y1), COL_CYAN, 2)
-
-                if abs(distance) > DEADZONE:
-                    speed = int(np.interp(abs(distance), (DEADZONE, 150), (0, 20)))
-                    if distance > 0:
-                        pyautogui.scroll(-speed * SCROLL_SPEED)
+                    # Click?
+                    dist = ((x1 - x2) ** 2 + (y1 - y2) ** 2) ** 0.5
+                    if dist < 30:
+                        mode = "CLICK"
+                        cv2.circle(img, (x1, y1), 10, COL_RED, -1)
+                        if not is_pinched:
+                            pyautogui.mouseDown()
+                            is_pinched = True
                     else:
-                        pyautogui.scroll(speed * SCROLL_SPEED)
+                        if is_pinched:
+                            pyautogui.mouseUp()
+                            is_pinched = False
 
-    draw_pro_hud(img, fps, current_mode, prev_x, prev_y)
+                # --- SCROLL MODE (Index Up, Middle Up) ---
+                elif index_up and middle_up:
+                    mode = "SCROLL"
+                    dist_from_center = (h // 2) - y1
 
-    cv2.imshow(WINDOW_NAME, img)
-    if cv2.waitKey(1) & 0xFF == ord("q"):
-        break
+                    if abs(dist_from_center) > DEADZONE:
+                        speed = int(
+                            np.interp(abs(dist_from_center), (DEADZONE, 150), (0, 15))
+                        )
+                        # Invert logic: Hand UP = Scroll UP
+                        if dist_from_center > 0:
+                            pyautogui.scroll(speed * SCROLL_SPEED)
+                        else:
+                            pyautogui.scroll(-speed * SCROLL_SPEED)
 
-cap.release()
-cv2.destroyAllWindows()
-sys.exit()
+                        cv2.line(img, (w // 2, h // 2), (w // 2, y1), COL_CYAN, 2)
+
+        draw_hud(img, fps, mode, prev_x, prev_y)
+        cv2.imshow(WINDOW_NAME, img)
+
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    run_vision_loop()
